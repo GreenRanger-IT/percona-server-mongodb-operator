@@ -8,11 +8,11 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
-	"go.mongodb.org/mongo-driver/mongo/readpref"
-	"go.mongodb.org/mongo-driver/mongo/writeconcern"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/mongo/readpref"
+	"go.mongodb.org/mongo-driver/v2/mongo/writeconcern"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 )
 
@@ -30,7 +30,7 @@ type Config struct {
 
 type Client interface {
 	Disconnect(ctx context.Context) error
-	Database(name string, opts ...*options.DatabaseOptions) ClientDatabase
+	Database(name string, opts ...options.Lister[options.DatabaseOptions]) ClientDatabase
 	Ping(ctx context.Context, rp *readpref.ReadPref) error
 
 	SetDefaultRWConcern(ctx context.Context, readConcern, writeConcern string) error
@@ -61,14 +61,13 @@ type Client interface {
 }
 
 type ClientDatabase interface {
-	RunCommand(ctx context.Context, runCommand interface{}, opts ...*options.RunCmdOptions) *mongo.SingleResult
+	RunCommand(ctx context.Context, runCommand any, opts ...options.Lister[options.RunCmdOptions]) *mongo.SingleResult
 }
-
 type mongoClient struct {
 	*mongo.Client
 }
 
-func (c *mongoClient) Database(name string, opts ...*options.DatabaseOptions) ClientDatabase {
+func (c *mongoClient) Database(name string, opts ...options.Lister[options.DatabaseOptions]) ClientDatabase {
 	return c.Client.Database(name, opts...)
 }
 
@@ -104,22 +103,21 @@ func Dial(ctx context.Context, conf *Config) (Client, error) {
 		})
 	}
 
-	tCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	client, err := mongo.Connect(tCtx, opts)
+	client, err := mongo.Connect(opts)
 	if err != nil {
 		return nil, errors.Wrap(err, "connect to mongo rs")
 	}
+
 	defer func() {
 		if err != nil {
-			derr := client.Disconnect(tCtx)
+			derr := client.Disconnect(ctx)
 			if derr != nil {
 				log.Error(err, "failed to disconnect")
 			}
 		}
 	}()
 
-	tCtx, cancel = context.WithTimeout(ctx, timeout)
+	tCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	err = client.Ping(tCtx, readpref.Primary())
 	if err != nil {
